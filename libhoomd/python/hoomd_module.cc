@@ -133,6 +133,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "PPPMForceCompute.h"
 #include "AllExternalPotentials.h"
 #include "Messenger.h"
+#include "DLTAngleForceCompute.h"
 
 // include GPU classes
 #ifdef ENABLE_CUDA
@@ -519,6 +520,7 @@ BOOST_PYTHON_MODULE(hoomd)
     export_ConstraintSphere();
     export_PPPMForceCompute();
     export_PotentialExternal<PotentialExternalPeriodic>("PotentialExternalPeriodic");
+    export_DLTAngleForceCompute();
 #ifdef ENABLE_CUDA
     export_CellListGPU();
     export_NeighborListGPU();

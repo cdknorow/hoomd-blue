@@ -321,6 +321,103 @@ class harmonic(force._force):
                 globals.msg.error(str(cur_type) + " coefficients missing in angle.harmonic\n");
                 raise RuntimeError("Error updating coefficients");
 
+## DLT %angle force
+#
+# The command angle.dlt specifies a %DLT potential energy between pairs of particles
+# with an order specified between them.
+#
+# \f[ V(\theta) = \frac{1}{2} k \left( \theta - \theta_0 \right)^2 \f]
+# where \f$ \theta \f$ is the angle between the triplet of particles.
+#
+# Coefficients:
+# - \f$ \theta_0 \f$ - rest %angle (in radians)
+# - \f$ k \f$ - %force constant (in units of energy/radians^2)
+#
+# Coefficients \f$ k \f$ and \f$ \theta_0 \f$ must be set for each type of %angle in the simulation using
+# set_coeff().
+#
+# \note Specifying the angle.harmonic command when no angles are defined in the simulation results in an error.
+# \MPI_SUPPORTED
+class dlt(force._force):
+    ## Specify the %harmonic %angle %force
+    #
+    # \b Example:
+    # \code
+    # harmonic = angle.harmonic()
+    # \endcode
+    def __init__(self):
+        util.print_status_line();
+        # check that some angles are defined
+        if globals.system_definition.getAngleData().getNGlobal() == 0:
+            globals.msg.error("No angles are defined.\n");
+            raise RuntimeError("Error creating dlt forces");
+
+        # initialize the base class
+        force._force.__init__(self);
+
+        # create the c++ mirror class
+        if not globals.exec_conf.isCUDAEnabled():
+            self.cpp_force = hoomd.DLTAngleForceCompute(globals.system_definition);
+        #else:
+        #    self.cpp_force = hoomd.HarmonicAngleForceComputeGPU(globals.system_definition);
+
+        globals.system.addCompute(self.cpp_force, self.force_name);
+
+        # variable for tracking which angle type coefficients have been set
+        self.angle_types_set = [];
+
+    ## Sets the %dlt %angle coefficients for a particular %angle type
+    #
+    # \param angle_type Angle type to set coefficients for
+    # \param k1 Coefficient \f$ k \f$ (in units of energy/radians^2)
+    # \param k2 Coefficient \f$ k \f$ (in units of energy/radians^2)
+    # \param b_x vector  for the force computation
+    # \param b_y vector  for the force computation
+    # \param b_z vector  for the force computation
+    #
+    # Using set_coeff() requires that the specified %angle %force has been saved in a variable. i.e.
+    # \code
+    # dlt = angle.dlt()
+    # \endcode
+    #
+    # \b Examples:
+    # \code
+    # dlt.set_coeff('p12', k1=3.0,k2= 3.0, b_x=1, b_y=1, b_z=2, ,)
+    # by_2)
+    # dlt.set_coeff('bond011', k=100.0, t0=1.0)
+    # \endcode
+    #
+    # The coefficients for every %angle type in the simulation must be set
+    # before the run() can be started.
+    def set_coeff(self, angle_type, k1, k2, b_x, b_y, b_z):
+        util.print_status_line();
+
+        # set the parameters for the appropriate type
+        self.cpp_force.setParams(globals.system_definition.getAngleData().getTypeByName(angle_type),
+                                                    k1,
+                                                    k2,
+                                                    b_x,
+                                                    b_y,
+                                                    b_z);
+
+        # track which particle types we have set
+        if not angle_type in self.angle_types_set:
+            self.angle_types_set.append(angle_type);
+
+    def update_coeffs(self):
+        # get a list of all angle types in the simulation
+        ntypes = globals.system_definition.getAngleData().getNTypes();
+        type_list = [];
+        for i in range(0,ntypes):
+            type_list.append(globals.system_definition.getAngleData().getNameByType(i));
+
+        # check to see if all particle types have been set
+        for cur_type in type_list:
+            if not cur_type in self.angle_types_set:
+                globals.msg.error(str(cur_type) + " coefficients missing in dlt.harmonic\n");
+                raise RuntimeError("Error updating coefficients");
+
+
 ## CGCMM %angle force
 #
 # The command angle.cgcmm defines a regular %harmonic potential energy between every defined triplet

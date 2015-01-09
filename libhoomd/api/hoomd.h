@@ -126,6 +126,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "PotentialTersoff.h"
 #include "PPPMForceCompute.h"
 #include "AllExternalPotentials.h"
+#include "DLTAngleForceCompute.h"
 
 
 // include GPU classes
