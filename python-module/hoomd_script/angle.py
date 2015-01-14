@@ -358,8 +358,8 @@ class dlt(force._force):
         # create the c++ mirror class
         if not globals.exec_conf.isCUDAEnabled():
             self.cpp_force = hoomd.DLTAngleForceCompute(globals.system_definition);
-        #else:
-        #    self.cpp_force = hoomd.HarmonicAngleForceComputeGPU(globals.system_definition);
+        else:
+            self.cpp_force = hoomd.DLTAngleForceComputeGPU(globals.system_definition);
 
         globals.system.addCompute(self.cpp_force, self.force_name);
 

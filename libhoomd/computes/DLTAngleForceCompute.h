@@ -83,7 +83,7 @@ class DLTAngleForceCompute : public ForceCompute
         virtual ~DLTAngleForceCompute();
 
         //! Set the parameters
-        virtual void setParams(unsigned int type, Scalar K1,Scalar K2, Scalar b_x, Scalar b_y, Scalar b_z
+        virtual void setParams(unsigned int type, Scalar K1, Scalar K2, Scalar b_x, Scalar b_y, Scalar b_z
 			);
 
         //! Returns a list of log quantities this compute calculates

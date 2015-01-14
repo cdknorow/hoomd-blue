@@ -61,7 +61,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define __DLTANGLEFORCEGPU_CUH__
 
 //! Kernel driver that computes DLT angle forces for DLTAngleForceComputeGPU
-cudaError_t gpu_compute_DLT_angle_forces(Scalar4* d_force,
+cudaError_t gpu_compute_dlt_angle_forces(Scalar4* d_force,
                                               Scalar* d_virial,
                                               const unsigned int virial_pitch,
                                               const unsigned int N,
@@ -71,7 +71,8 @@ cudaError_t gpu_compute_DLT_angle_forces(Scalar4* d_force,
                                               const unsigned int *apos_list,
                                               const unsigned int pitch,
                                               const unsigned int *n_angles_list,
-                                              Scalar5 *d_params,
+                                              Scalar2 *d_params_k,
+                                              Scalar4 *d_params_b,
                                               unsigned int n_angle_types,
                                               int block_size,
                                               const unsigned int compute_capability);

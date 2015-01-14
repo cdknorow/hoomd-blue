@@ -108,7 +108,8 @@ class DLTAngleForceComputeGPU : public DLTAngleForceCompute
 
     protected:
         boost::scoped_ptr<Autotuner> m_tuner; //!< Autotuner for block size
-        GPUArray<Scalar5>  m_params;          //!< Parameters stored on the GPU
+        GPUArray<Scalar2>  m_params_k;          //!< Parameters stored on the GPU
+        GPUArray<Scalar4>  m_params_b;          //!< Parameters stored on the GPU
 
         //! Actually compute the forces
         virtual void computeForces(unsigned int timestep);

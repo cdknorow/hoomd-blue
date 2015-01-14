@@ -66,7 +66,8 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 //! Texture for reading angle parameters
-scalar5_tex_t angle_params_tex;
+scalar4_tex_t angle_params_tex4;
+scalar2_tex_t angle_params_tex2;
 
 //! Kernel for caculating DLT angle forces on the GPU
 /*! \param d_force Device memory to write computed forces
@@ -80,12 +81,13 @@ scalar5_tex_t angle_params_tex;
     \param pitch Pitch of 2D angles list
     \param n_angles_list List of numbers of angles stored on the GPU
 */
-extern "C" __global__ void gpu_compute_DLT_angle_forces_kernel(Scalar4* d_force,
+extern "C" __global__ void gpu_compute_dlt_angle_forces_kernel(Scalar4* d_force,
                                                                     Scalar* d_virial,
                                                                     const unsigned int virial_pitch,
                                                                     const unsigned int N,
                                                                     const Scalar4 *d_pos,
-                                                                    const Scalar5 *d_params,
+                                                                    const Scalar2 *d_params_k,
+                                                                    const Scalar4 *d_params_b,
                                                                     BoxDim box,
                                                                     const group_storage<3> *alist,
                                                                     const unsigned int *apos_list,
@@ -104,12 +106,12 @@ extern "C" __global__ void gpu_compute_DLT_angle_forces_kernel(Scalar4* d_force,
     // read in the position of our b-particle from the a-b-c triplet. (MEM TRANSFER: 16 bytes)
     Scalar4 idx_postype = d_pos[idx];  // we can be either a, b, or c in the a-b-c triplet
     Scalar3 idx_pos = make_scalar3(idx_postype.x, idx_postype.y, idx_postype.z);
-    Scalar3 a_pos,b_pos,c_pos; // allocate space for the a,b, and c atom in the a-b-c triplet
+    Scalar3 a_pos,b_pos; // allocate space for the a and atom in the a-b-c triplet
 
     // initialize the force to 0
     Scalar4 force_idx = make_scalar4(Scalar(0.0), Scalar(0.0), Scalar(0.0), Scalar(0.0));
 
-    Scalar fab[3], fcb[3];
+    Scalar3 force_vector;
 
     // initialize the virial to 0
     Scalar virial[6];
@@ -122,7 +124,6 @@ extern "C" __global__ void gpu_compute_DLT_angle_forces_kernel(Scalar4* d_force,
         group_storage<3> cur_angle = alist[pitch*angle_idx + idx];
 
         int cur_angle_x_idx = cur_angle.idx[0];
-        int cur_angle_y_idx = cur_angle.idx[1];
         int cur_angle_type = cur_angle.idx[2];
 
         int cur_angle_abc = apos_list[pitch*angle_idx + idx];
@@ -130,114 +131,93 @@ extern "C" __global__ void gpu_compute_DLT_angle_forces_kernel(Scalar4* d_force,
         // get the a-particle's position (MEM TRANSFER: 16 bytes)
         Scalar4 x_postype = d_pos[cur_angle_x_idx];
         Scalar3 x_pos = make_scalar3(x_postype.x, x_postype.y, x_postype.z);
-        // get the c-particle's position (MEM TRANSFER: 16 bytes)
-        Scalar4 y_postype = d_pos[cur_angle_y_idx];
-        Scalar3 y_pos = make_scalar3(y_postype.x, y_postype.y, y_postype.z);
+        // if curr_angle == 2, this is a dummy particle and we don't calculate anything
+        if (cur_angle_abc != 2){
+             // if curr_angle == 0 the b values are in order,
+            if (cur_angle_abc == 0)
+                {
+                a_pos = idx_pos;
+                b_pos = x_pos;
+                }
+            // if curr_angle == 1 the b values are backwards,
+            if (cur_angle_abc == 1)
+                {
+                b_pos = idx_pos;
+                a_pos = x_pos;
+                }
+ 
+            // calculate dr for a-b,c-b,and a-c
+            Scalar3 dx = a_pos - b_pos;
 
-        if (cur_angle_abc == 0)
-            {
-            a_pos = idx_pos;
-            b_pos = x_pos;
-            c_pos = y_pos;
+            // apply periodic boundary conditions
+            dx = box.minImage(dx);
+
+            // get the angle parameters (MEM TRANSFER: 8 bytes)
+            Scalar2 params_k = texFetchScalar2(d_params_k, angle_params_tex2, cur_angle_type);
+            Scalar4 params_b = texFetchScalar4(d_params_b, angle_params_tex4, cur_angle_type);
+            Scalar K1 = params_k.x;
+            Scalar K2 = params_k.y;
+            Scalar b_x = params_b.x;
+            Scalar b_y = params_b.y;
+            Scalar b_z = params_b.z;
+
+            //Calculate ax ay az and a
+            Scalar ax = dx.x + b_x;
+            Scalar ay = dx.y + b_y;
+            Scalar az = dx.z + b_z; 
+            Scalar a  = ax * b_x + ay * b_y + az * b_z;
+
+            // Force F1
+            force_vector.x = - K1 * ax;
+            force_vector.y = - K1 * ay;
+            force_vector.z = - K1 * az;
+
+            //Compute V1 Energy
+            Scalar bond_eng = Scalar(0.5) * K1 * ( ax * ax + ay * ay + az * az );
+       
+            // Force F2
+            force_vector.x += - K2 * b_x * a;
+            force_vector.y += - K2 * b_y * a;
+            force_vector.z += - K2 * b_z * a;
+
+            // Compute V2 Energy
+            bond_eng += Scalar(0.5) * K2 * (  ax * ax * b_x * b_x +
+                                              ay * ay * b_y * b_y +
+                                              az * az * b_z * b_z +
+                                              2 * ax * b_x * ay * b_y +
+                                              2 * ax * b_x * az * b_z +
+                                              2 * az * b_z * ay * b_y);
+
+            bond_eng *=  Scalar(0.5);
+                
+            // compute 1/2 of the virial, 1/2 for each atom in the bond
+            // upper triangular version of virial tensor
+            Scalar bond_virial[6];
+            bond_virial[0] = Scalar(0.5) * dx.x * force_vector.x; // Fx*x
+            bond_virial[1] = Scalar(0.5) * dx.y * force_vector.x; // Fx*y
+            bond_virial[2] = Scalar(0.5) * dx.z * force_vector.x; // Fx*z
+            bond_virial[3] = Scalar(0.5) * dx.y * force_vector.y; // Fy*y
+            bond_virial[4] = Scalar(0.5) * dx.z * force_vector.y; // Fy*z
+
+            if (cur_angle_abc == 0)
+                {
+                force_idx.x += force_vector.x;
+                force_idx.y += force_vector.y;
+                force_idx.z += force_vector.z;
+                }
+            if (cur_angle_abc == 1)
+                {
+                force_idx.x -= force_vector.x;
+                force_idx.y -= force_vector.y;
+                force_idx.z -= force_vector.z;
+                }
+
+            force_idx.w += bond_eng;
+
+            for (int i = 0; i < 6; i++)
+                virial[i] += bond_virial[i];
             }
-        if (cur_angle_abc == 1)
-            {
-            b_pos = idx_pos;
-            a_pos = x_pos;
-            c_pos = y_pos;
-            }
-        if (cur_angle_abc == 2)
-            {
-            c_pos = idx_pos;
-            a_pos = x_pos;
-            b_pos = y_pos;
-            }
-
-        // calculate dr for a-b,c-b,and a-c
-        Scalar3 dab = a_pos - b_pos;
-        Scalar3 dcb = c_pos - b_pos;
-        Scalar3 dac = a_pos - c_pos;
-
-        // apply periodic boundary conditions
-        dab = box.minImage(dab);
-        dcb = box.minImage(dcb);
-        dac = box.minImage(dac);
-
-        // get the angle parameters (MEM TRANSFER: 8 bytes)
-        Scalar2 params = texFetchScalar2(d_params, angle_params_tex, cur_angle_type);
-        Scalar K = params.x;
-        Scalar t_0 = params.y;
-
-        Scalar rsqab = dot(dab, dab);
-        Scalar rab = sqrtf(rsqab);
-        Scalar rsqcb = dot(dcb, dcb);
-        Scalar rcb = sqrtf(rsqcb);
-
-        Scalar c_abbc = dot(dab, dcb);
-        c_abbc /= rab*rcb;
-
-        if (c_abbc > Scalar(1.0)) c_abbc = Scalar(1.0);
-        if (c_abbc < -Scalar(1.0)) c_abbc = -Scalar(1.0);
-
-        Scalar s_abbc = sqrtf(Scalar(1.0) - c_abbc*c_abbc);
-        if (s_abbc < SMALL) s_abbc = SMALL;
-        s_abbc = Scalar(1.0)/s_abbc;
-
-        // actually calculate the force
-        Scalar dth = fast::acos(c_abbc) - t_0;
-        Scalar tk = K*dth;
-
-        Scalar a = -Scalar(1.0) * tk * s_abbc;
-        Scalar a11 = a*c_abbc/rsqab;
-        Scalar a12 = -a / (rab*rcb);
-        Scalar a22 = a*c_abbc / rsqcb;
-
-        fab[0] = a11*dab.x + a12*dcb.x;
-        fab[1] = a11*dab.y + a12*dcb.y;
-        fab[2] = a11*dab.z + a12*dcb.z;
-
-        fcb[0] = a22*dcb.x + a12*dab.x;
-        fcb[1] = a22*dcb.y + a12*dab.y;
-        fcb[2] = a22*dcb.z + a12*dab.z;
-
-        // compute 1/3 of the energy, 1/3 for each atom in the angle
-        Scalar angle_eng = tk*dth*Scalar(Scalar(1.0)/Scalar(6.0));
-
-        // upper triangular version of virial tensor
-        Scalar angle_virial[6];
-        angle_virial[0] = Scalar(1./3.)*(dab.x*fab[0] + dcb.x*fcb[0]);
-        angle_virial[1] = Scalar(1./3.)*(dab.y*fab[0] + dcb.y*fcb[0]);
-        angle_virial[2] = Scalar(1./3.)*(dab.z*fab[0] + dcb.z*fcb[0]);
-        angle_virial[3] = Scalar(1./3.)*(dab.y*fab[1] + dcb.y*fcb[1]);
-        angle_virial[4] = Scalar(1./3.)*(dab.z*fab[1] + dcb.z*fcb[1]);
-        angle_virial[5] = Scalar(1./3.)*(dab.z*fab[2] + dcb.z*fcb[2]);
-
-
-        if (cur_angle_abc == 0)
-            {
-            force_idx.x += fab[0];
-            force_idx.y += fab[1];
-            force_idx.z += fab[2];
-            }
-        if (cur_angle_abc == 1)
-            {
-            force_idx.x -= fab[0] + fcb[0];
-            force_idx.y -= fab[1] + fcb[1];
-            force_idx.z -= fab[2] + fcb[2];
-            }
-        if (cur_angle_abc == 2)
-            {
-            force_idx.x += fcb[0];
-            force_idx.y += fcb[1];
-            force_idx.z += fcb[2];
-            }
-
-        force_idx.w += angle_eng;
-
-        for (int i = 0; i < 6; i++)
-            virial[i] += angle_virial[i];
         }
-
     // now that the force calculation is complete, write out the result (MEM TRANSFER: 20 bytes)
     d_force[idx] = force_idx;
     for (int i = 0; i < 6; i++)
@@ -264,7 +244,7 @@ extern "C" __global__ void gpu_compute_DLT_angle_forces_kernel(Scalar4* d_force,
     \a d_params should include one Scalar2 element per angle type. The x component contains K the spring constant
     and the y component contains t_0 the equilibrium angle.
 */
-cudaError_t gpu_compute_DLT_angle_forces(Scalar4* d_force,
+cudaError_t gpu_compute_dlt_angle_forces(Scalar4* d_force,
                                               Scalar* d_virial,
                                               const unsigned int virial_pitch,
                                               const unsigned int N,
@@ -274,7 +254,8 @@ cudaError_t gpu_compute_DLT_angle_forces(Scalar4* d_force,
                                               const unsigned int *apos_list,
                                               const unsigned int pitch,
                                               const unsigned int *n_angles_list,
-                                              Scalar2 *d_params,
+                                              Scalar2 *d_params_k,
+                                              Scalar4 *d_params_b,
                                               unsigned int n_angle_types,
                                               int block_size,
                                               const unsigned int compute_capability)
@@ -285,7 +266,7 @@ cudaError_t gpu_compute_DLT_angle_forces(Scalar4* d_force,
     if (max_block_size == UINT_MAX)
         {
         cudaFuncAttributes attr;
-        cudaFuncGetAttributes(&attr, (const void *)gpu_compute_DLT_angle_forces_kernel);
+        cudaFuncGetAttributes(&attr, (const void *)gpu_compute_dlt_angle_forces_kernel);
         max_block_size = attr.maxThreadsPerBlock;
         }
 
@@ -294,17 +275,19 @@ cudaError_t gpu_compute_DLT_angle_forces(Scalar4* d_force,
     // setup the grid to run the kernel
     dim3 grid( N / run_block_size + 1, 1, 1);
     dim3 threads(run_block_size, 1, 1);
-
     // bind the texture on pre sm 35 arches
     if (compute_capability < 350)
         {
-        cudaError_t error = cudaBindTexture(0, angle_params_tex, d_params, sizeof(Scalar2) * n_angle_types);
+        cudaError_t error = cudaBindTexture(0, angle_params_tex4, d_params_b, sizeof(Scalar4) * n_angle_types);
         if (error != cudaSuccess)
             return error;
+        cudaError_t error2 = cudaBindTexture(0, angle_params_tex2, d_params_k, sizeof(Scalar2) * n_angle_types);
+        if (error2 != cudaSuccess)
+            return error2;
         }
 
     // run the kernel
-    gpu_compute_DLT_angle_forces_kernel<<< grid, threads>>>(d_force, d_virial, virial_pitch, N, d_pos, d_params, box,
+    gpu_compute_dlt_angle_forces_kernel<<< grid, threads>>>(d_force, d_virial, virial_pitch, N, d_pos, d_params_k, d_params_b, box,
         atable, apos_list, pitch, n_angles_list);
 
     return cudaSuccess;

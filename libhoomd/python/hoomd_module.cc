@@ -156,6 +156,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#include "ConstExternalFieldDipoleForceComputeGPU.h"
 #include "BondTablePotentialGPU.h"
 #include "TablePotentialGPU.h"
+#include "DLTAngleForceComputeGPU.h"
 #include "HarmonicAngleForceComputeGPU.h"
 #include "TableAngleForceComputeGPU.h"
 #include "HarmonicDihedralForceComputeGPU.h"
@@ -545,6 +546,7 @@ BOOST_PYTHON_MODULE(hoomd)
     export_BondTablePotentialGPU();
     export_TablePotentialGPU();
     export_EAMForceComputeGPU();
+    export_DLTAngleForceComputeGPU();
     export_HarmonicAngleForceComputeGPU();
     export_TableAngleForceComputeGPU();
     export_HarmonicDihedralForceComputeGPU();

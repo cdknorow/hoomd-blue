@@ -81,9 +81,10 @@ DLTAngleForceComputeGPU::DLTAngleForceComputeGPU(boost::shared_ptr<SystemDefinit
         }
 
     // allocate and zero device memory
-    GPUArray<Scalar2> params(m_angle_data->getNTypes(), exec_conf);
-    m_params.swap(params);
-
+    GPUArray<Scalar2> params_k(m_angle_data->getNTypes(), exec_conf);
+    GPUArray<Scalar4> params_b(m_angle_data->getNTypes(), exec_conf);
+    m_params_k.swap(params_k);
+    m_params_b.swap(params_b);
     m_tuner.reset(new Autotuner(32, 1024, 32, 5, 100000, "dlt_angle", this->m_exec_conf));
     }
 
@@ -102,9 +103,11 @@ void DLTAngleForceComputeGPU::setParams(unsigned int type, Scalar K1, Scalar K2,
     {
     DLTAngleForceCompute::setParams(type, K1, K2, b_x, b_y, b_z);
 
-    ArrayHandle<Scalar5> h_params(m_params, access_location::host, access_mode::readwrite);
+    ArrayHandle<Scalar2> params_k(m_params_k, access_location::host, access_mode::readwrite);
+    ArrayHandle<Scalar4> params_b(m_params_b, access_location::host, access_mode::readwrite);
     // update the local copy of the memory
-    h_params.data[type] = make_scalar5(K1, K2, b_x, b_y, b_z);
+    params_k.data[type] = make_scalar2(K1, K2);
+    params_b.data[type] = make_scalar4(b_x, b_y, b_z, Scalar(0.0));
     }
 
 /*! Internal method for computing the forces on the GPU.
@@ -126,7 +129,10 @@ void DLTAngleForceComputeGPU::computeForces(unsigned int timestep)
 
     ArrayHandle<Scalar4> d_force(m_force,access_location::device,access_mode::overwrite);
     ArrayHandle<Scalar> d_virial(m_virial,access_location::device,access_mode::overwrite);
-    ArrayHandle<Scalar5> d_params(m_params, access_location::device, access_mode::read);
+
+
+    ArrayHandle<Scalar2> d_params_k(m_params_k, access_location::device, access_mode::read);
+    ArrayHandle<Scalar4> d_params_b(m_params_b, access_location::device, access_mode::read);
 
     ArrayHandle<AngleData::members_t> d_gpu_anglelist(m_angle_data->getGPUTable(), access_location::device,access_mode::read);
     ArrayHandle<unsigned int> d_gpu_angle_pos_list(m_angle_data->getGPUPosTable(), access_location::device,access_mode::read);
@@ -134,7 +140,7 @@ void DLTAngleForceComputeGPU::computeForces(unsigned int timestep)
 
     // run the kernel on the GPU
     m_tuner->begin();
-    gpu_compute_harmonic_angle_forces(d_force.data,
+    gpu_compute_dlt_angle_forces(d_force.data,
                                       d_virial.data,
                                       m_virial.getPitch(),
                                       m_pdata->getN(),
@@ -144,7 +150,8 @@ void DLTAngleForceComputeGPU::computeForces(unsigned int timestep)
                                       d_gpu_angle_pos_list.data,
                                       m_angle_data->getGPUTableIndexer().getW(),
                                       d_gpu_n_angles.data,
-                                      d_params.data,
+                                      d_params_k.data,
+                                      d_params_b.data,
                                       m_angle_data->getNTypes(),
                                       m_tuner->getParam(),
                                       m_exec_conf->getComputeCapability());
