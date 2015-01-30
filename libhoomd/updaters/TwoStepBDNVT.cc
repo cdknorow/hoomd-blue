@@ -228,7 +228,7 @@ void TwoStepBDNVT::integrateStepTwo(unsigned int timestep)
         // Generate three random numbers
         Scalar rx = saru.d(-1,1);
         Scalar ry = saru.d(-1,1);
-        Scalar rz =  saru.d(-1,1);
+        Scalar rz = saru.d(-1,1);
 
         Scalar gamma;
         if (m_gamma_diam)

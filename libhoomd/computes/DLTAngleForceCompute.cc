@@ -47,7 +47,7 @@ OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-// Maintainer: dnlebard
+// Maintainer: cdknrow
 
 #ifdef WIN32
 #pragma warning( push )
@@ -270,7 +270,7 @@ void DLTAngleForceCompute::computeForces(unsigned int timestep)
                                           2 * ax * b_x * az * b_z +
                                           2 * az * b_z * ay * b_y);
 
-	    // Half bond energy so it is not double counted
+        // Half bond energy so it is not double counted
         bond_eng *=  Scalar(0.5);
             
 	    // compute 1/2 of the virial, 1/2 for each atom in the bond
